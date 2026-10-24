@@ -1,0 +1,4 @@
+design,pct_trades_settled,pct_value_settled,avg_settle_min,cash_used_cr,clearings,avg_lp_seconds,trust_peak_pct_of_day
+RTGS / gross only (retry every 1 min),99.4,98.68,1.07,76.98,336,0.0,0.0
+LP clearing every 5 min (INDEVAL),99.1,98.72,4.19,64.01,68,0.018,0.0
+LP clearing once at end of day,99.13,98.81,138.09,24.91,1,1.508,0.0
