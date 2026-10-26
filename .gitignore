@@ -1,0 +1,10 @@
+# raw data (large, and it's the exchange's file, shouldn't be shared)
+data/Stock_Trades_Orders/
+
+# generated outputs (recreated every time you run the steps)
+data/*.csv
+data/*.png
+
+# Python cache
+__pycache__/
+*.pyc
