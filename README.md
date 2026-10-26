@@ -3,7 +3,8 @@
 This project rebuilds the clearing-and-settlement model from Muñoz et al. (2011),
 *INDEVAL Develops a New Operating and Settlement System Using Operations Research*,
 using Indian order-book (L2) data. The buyers and sellers are synthetic, because L2
-data contains no counterparty identities. Say so in your methodology section.
+data contains no counterparty identities. 
+The dataset used: [Anomaly bias Stock Trades and Order Dataset](https://data.mendeley.com/datasets/fsn6fn7ht8/1)
 
 ```
 L2 snapshots ──step1──> trades ──step2,3──> DvP instructions (seller, buyer, stock, qty, price, time)
@@ -196,17 +197,9 @@ Outputs: `data/scenario_results.csv`, `data/tradeoff_chart.png`
 
 ---
 
-## Experiments worth adding to your report
 
-1. **Coverage sweep.** Re-run steps 4–6 with `SECURITY_COVERAGE` = 0.2, 0.3, 0.5, 1.0.
-   The LP's advantage over RTGS grows as holdings get tighter.
-2. **Limited cash.** Set `CASH_COVERAGE = 0.15` and compare value settled across designs.
-3. **Concentration.** Change `PARETO_ALPHA` (1.1 = very concentrated, 3 = even). More
-   concentration means more offsetting flows, so netting helps more.
-4. **Robustness.** Change `SEED` in step 3 a few times and report the mean and range,
-   since the counterparties are random.
 
-## Limitations to state
+## Limitations
 
 - Counterparties are simulated, not observed.
 - With book-only L2 data, cancellations at the best price can be mistaken for trades.
