@@ -1,9 +1,10 @@
+import numpy as np
 import pandas as pd
 
 SRC = "data/Stock_Trades_Orders/Trades .csv"
 OUT = "data"
 DATE = None          # None = busiest day by value; or set e.g. "13-Apr-07"
-OPEN_HOUR = 9        # 09:55 open in 2007
+OPEN, CLOSE = "09:55", "15:30"
 
 t = pd.read_csv(SRC, dtype=str)
 t.columns = [c.strip().upper() for c in t.columns]
@@ -12,38 +13,25 @@ t["qty"] = t["TRADE_QUANTITY"].astype(float).astype(int)
 t["price"] = t["TRADE_RATE"].astype(float) / 100          # paise -> rupees
 t["val"] = t["qty"] * t["price"]
 
-# which days are in the file?
 daily = (t.groupby("TRADE_DATE")
           .agg(trades=("qty", "size"), value_cr=("val", lambda s: round(s.sum() / 1e7, 1))))
 daily = daily.sort_values("value_cr", ascending=False)
 print("Trading days in file (busiest first):")
 print(daily.to_string())
-
 if DATE is None:
     DATE = daily.index[0]
 print(f"\nUsing day: {DATE}")
 t = t[t["TRADE_DATE"] == DATE].copy()
 
-# rebuild the missing hour, using TRADE_SEQUENCE order within this one day
-t["NUM"] = t["TRADE_NUMBER"].astype(int)
-t = t.sort_values("NUM").reset_index(drop=True)
-mmss = t["TRADE_TIME"].str.split(":", expand=True)
-sec = mmss[0].astype(int) * 60 + mmss[1].astype(float)
-jumps = sec.diff()
-print("hour wraps:", int((jumps < -1800).sum()))
-print("bad backward jumps (should be ~0):", int(((jumps < -1) & (jumps >= -1800)).sum()))
-wraps = (sec.diff() < -1800).cumsum()                     # mm:ss jumped back -> new hour
-first_min = sec.iloc[0] / 60
-hour = OPEN_HOUR + (1 if first_min < 55 else 0) + wraps
-day = pd.to_datetime(DATE, format="%d-%b-%y")
-t["timestamp"] = day + pd.to_timedelta(hour, unit="h") + pd.to_timedelta(sec, unit="s")
-
-# checks: must sit inside the trading session
-print(f"\nfirst trade: {t['timestamp'].min()} | last trade: {t['timestamp'].max()}")
-print("trades per hour:")
-print(t["timestamp"].dt.hour.value_counts().sort_index().to_string())
-if t["timestamp"].min().hour < 9 or t["timestamp"].max().strftime("%H:%M") > "15:30":
-    print("WARNING: timestamps fall outside 09:55-15:30. Check the hour rebuild before continuing.")
+# no usable clock time in this file: keep the file's order (TRADE_SEQUENCE)
+# and spread the trades evenly across the session
+t["SEQ"] = t["TRADE_SEQUENCE"].astype(int)
+t = t.sort_values("SEQ").reset_index(drop=True)
+start = pd.to_datetime(f"{DATE} {OPEN}", format="%d-%b-%y %H:%M")
+end = pd.to_datetime(f"{DATE} {CLOSE}", format="%d-%b-%y %H:%M")
+n = len(t)
+t["timestamp"] = start + pd.to_timedelta(np.linspace(0, (end - start).total_seconds(), n), unit="s")
+print(f"\ntrades: {n:,} | first: {t['timestamp'].min()} | last: {t['timestamp'].max()}")
 
 # build settlement instructions
 same = t["BUY_MEMBER_CODE"] == t["SELL_MEMBER_CODE"]
