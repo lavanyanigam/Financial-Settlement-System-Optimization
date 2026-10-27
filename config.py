@@ -1,81 +1,61 @@
 """
-All the knobs for the project live here.
-Change these, then re-run the steps. Nothing else needs editing for a first run.
+All configuration settings for the Indian DvP Settlement Optimization.
+Directly models the INDEVAL settlement mechanism from Muñoz et al. (2011).
 """
 
-# ---------------------------------------------------------------- files
+# ---------------------------------------------------------------- Data Files
 DATA_DIR = "data"
-L2_FILE = "data/l2_orderbook.csv"          # <- put your real L2 export here
-TRADES_FILE = "data/trades.csv"             # output of step 1
-PARTICIPANTS_FILE = "data/participants.csv" # output of step 2
-INSTRUCTIONS_FILE = "data/instructions.csv" # output of step 3 (trades + seller/buyer)
-SEC_BAL_FILE = "data/initial_securities.csv"  # output of step 4 (B_ik)
-CASH_BAL_FILE = "data/initial_cash.csv"       # output of step 4 (C_i)
-RESULTS_FILE = "data/scenario_results.csv"    # output of step 6
+RAW_TRADES_FILE = "data/Stock_Trades_Orders/Trades .csv"
+
+# Preprocessed from real exchange records
+INSTRUCTIONS_FILE = "data/instructions.csv"  # DvP instructions (buyer, seller, ticker, qty, price)
+PARTICIPANTS_FILE = "data/participants.csv"  # Real brokers/members (with trading volume weights)
+SEC_BAL_FILE = "data/initial_securities.csv"  # Initial stock inventories B_ik
+CASH_BAL_FILE = "data/initial_cash.csv"       # Initial cash credit lines C_i
+STEP5_FILE = "data/step5_comparison.csv"     # Output of Step 5 comparison
+RESULTS_FILE = "data/scenario_results.csv"   # Output of Step 6 scenario grid
 
 SEED = 42
 
-# ---------------------------------------------------------------- step 1: reading your L2 file
-# Rename YOUR column names (left) to the names the code expects (right).
-# Leave a line out if your file already uses the expected name.
-# Expected: timestamp, ticker, bid_px_1..N, bid_sz_1..N, ask_px_1..N, ask_sz_1..N
-# Optional (makes inference much better): last_px, last_sz, volume (cumulative day volume)
-COLUMN_MAP = {
-    # "Date/Time": "timestamp",
-    # "Security": "ticker",
-    # "BID_PRICE_1": "bid_px_1",
-    # "BID_SIZE_1": "bid_sz_1",
-    # "ASK_PRICE_1": "ask_px_1",
-    # "ASK_SIZE_1": "ask_sz_1",
-}
-BOOK_LEVELS = 5            # how many depth levels your file has (1 is enough to work)
-
-# "auto"        : use last_px/last_sz if present, else book diffs (+volume check if present)
-# "prints"      : only use last_px / last_sz / volume columns
-# "book_volume" : book diffs, kept only when cumulative volume also went up
-# "book_only"   : book diffs only (cancellations will be mistaken for trades)
-INFERENCE_MODE = "auto"
-
-# Real NSE days have hundreds of thousands of trades. Aggregating them into
-# buckets keeps the LP small. 0 = no aggregation, 60 = one instruction per
-# ticker per side per minute.
-AGGREGATE_SECONDS = 0
-
-# ---------------------------------------------------------------- step 2: participants
-N_PARTICIPANTS = 30
-PARTICIPANT_TYPES = {      # type: share of participants
-    "Bank": 0.30,
-    "MutualFund": 0.25,
-    "Insurer": 0.10,
-    "Broker": 0.25,
-    "FPI": 0.10,
-}
-PARETO_ALPHA = 1.5         # lower = more concentrated (a few very big players)
-
-# ---------------------------------------------------------------- step 4: starting balances
-# B_ik = SECURITY_COVERAGE x (participant i's total sells of k during the day)
-# Cash, two options:
-#   CASH_COVERAGE = None -> the paper's set-up: everyone starts with zero cash and
-#                           can borrow without limit; the simulator measures how
-#                           much borrowing (liquidity) each design needs.
-#   CASH_COVERAGE = 0.15 -> stress test: each participant gets a credit line of
-#                           15% of its day's buys, so cash can also run out.
-SECURITY_COVERAGE = 0.3
-CASH_COVERAGE = None
-
-# ---------------------------------------------------------------- step 6: scenario grid (paper p.13)
-PRESETTLE_RULES = ["all_to_clearing", "gross_first"]
-OBJECTIVES = ["value", "quantity"]          # max cash value vs max number of securities
-# Paper: 60,000 / 75,000 million pesos on a ~US$250bn day (about 1.8% / 2.3% of the
-# day's value). We set the INR triggers as the same shares of YOUR day's value.
-VALUE_TRIGGER_SHARES = [0.018, 0.023]
-# Paper: 250 / 350 instructions. The right number depends on how many instructions
-# your day has, so we also set it as a share of the day's instruction count
-# (1.2% and 1.7% keep the 250:350 ratio and make it compete with the value trigger).
-# To use the paper's raw numbers instead, set COUNT_TRIGGERS_ABSOLUTE = [250, 350].
-COUNT_TRIGGER_SHARES = [0.012, 0.017]
-COUNT_TRIGGERS_ABSOLUTE = None
-TIME_TRIGGERS_MIN = [5, 10, 15]
-
+# ---------------------------------------------------------------- Market Timings & Setup
 MARKET_OPEN = "09:55:00"
 MARKET_CLOSE = "15:30:00"
+
+# ---------------------------------------------------------------- Initial Balances Setup
+# B_ik = SECURITY_COVERAGE x (participant i's total sells of stock k during the day)
+# Setting this to 0.3 means participants start with 30% of needed stock inventory.
+# They must wait for incoming trade deliveries to fulfill subsequent sales,
+# testing the LP's ability to untangle settlement gridlocks.
+SECURITY_COVERAGE = 0.3
+
+# Cash Setup:
+# None = The paper's baseline setup: participants start at zero cash and have intraday
+#        central bank overdraft access. The simulation tracks peak negative cash to measure
+#        exact liquidity demand.
+# 0.15 = Stress test: Credit line capped at 15% of daily purchases.
+CASH_COVERAGE = None
+
+# ---------------------------------------------------------------- Paper's 48-Scenario Grid (p. 13)
+# 1. Presettlement rules:
+#    - "all_to_clearing": all instructions wait in queue for periodic LP clearing
+#    - "gross_first"    : settle immediately if both cash and shares are available; else queue
+PRESETTLE_RULES = ["all_to_clearing", "gross_first"]
+
+# 2. Optimization objectives:
+#    - "value"   : maximize cash value of settled trades (p_l * x_l)
+#    - "quantity": maximize total shares settled (x_l)
+OBJECTIVES = ["value", "quantity"]
+
+# 3. Value triggers:
+#    In the paper: 60,000 / 75,000 million pesos on a ~US$250bn day (~1.8% / 2.3% of daily value).
+#    We apply the exact same percentages to the Indian trading day value.
+VALUE_TRIGGER_SHARES = [0.018, 0.023]
+
+# 4. Count triggers:
+#    In the paper: 250 / 350 instructions (~1.2% / 1.7% of instructions count).
+COUNT_TRIGGER_SHARES = [0.012, 0.017]
+COUNT_TRIGGERS_ABSOLUTE = None
+
+# 5. Time triggers:
+#    Run LP clearing batch every 5, 10, or 15 minutes.
+TIME_TRIGGERS_MIN = [5, 10, 15]
