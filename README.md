@@ -1,6 +1,7 @@
 # INDEVAL Settlement Optimization on Indian Equity Market Data
 
 This project replicates and evaluates the Central Securities Depository clearing-and-settlement optimization model from Muñoz et al. (2011), *INDEVAL Develops a New Operating and Settlement System Using Operations Research* (Franz Edelman Award, INFORMS), using **real Indian stock exchange trade data**.
+The dataset used: [Anomaly bias Stock Trades and Order Dataset](https://data.mendeley.com/datasets/fsn6fn7ht8/1)
 
 ---
 
