@@ -1,25 +1,24 @@
-"""
-STEP 5 - show WHY the clearing LP helps, before running the full scenario grid.
-
-Part A: how much cash and stock would be needed if nothing were netted
-        (RTGS, each trade settled on arrival with unlimited credit) versus
-        fully netted at the end of the day.
-Part B: the same day run three ways with the SAME starting balances:
-        1. gross_only     - model 1/RTGS: one trade at a time, retried every minute
-        2. LP every 5 min - INDEVAL-style clearing (P2 + P3)
-        3. LP once at EOD - a classic once-a-day model 3 system
-
-This is your headline table (the paper's "52% less liquidity" result).
-
-Run:  python step5_netting_benefit.py
-"""
+# step 5 shows why the clearing LP helps, before we run the whole scenario grid.
+#
+# part A works out how much cash and stock you'd need to settle every trade if nothing
+# were netted (each trade settled on arrival with unlimited credit), compared with
+# netting everything at the end of the day.
+#
+# part B runs the same day three ways with the same opening balances:
+#   gross_only      model 1 / RTGS, one trade at a time, retried every minute
+#   LP every 5 min  INDEVAL-style clearing with P2 + P3
+#   LP once at EOD  a classic once-a-day model 3 system
+# this is our version of the paper's "52% less liquidity" result.
+#
+# run it with: python step5_netting_benefit.py
 from collections import defaultdict
 import pandas as pd
+import config as C
 import simulator as S
 
 ins, sec0, cash0 = S.load_inputs()
 
-# ---------------- Part A
+# part A: running cash and share positions, with the peak for every member
 cum, peak = defaultdict(float), defaultdict(float)
 scum, speak = defaultdict(float), defaultdict(float)
 for r in ins.itertuples():
@@ -37,8 +36,8 @@ print(f"  Cash  : RTGS on arrival INR {gross_cash / 1e7:8.1f} cr | end-of-day ne
 print(f"  Shares: RTGS on arrival {gross_sec:12,.0f} | end-of-day net {net_sec:12,.0f}"
       f" | saving {1 - net_sec / gross_sec:.0%}")
 
-# ---------------- Part B
-print("\nPART B - same starting balances, three settlement designs (takes ~1 min)")
+# part B
+print("\nPART B - same starting balances, three settlement designs")
 runs = [
     ("RTGS / gross only (retry every 1 min)", dict(rule="gross_only", time_trigger_min=1)),
     ("LP clearing every 5 min (INDEVAL)",       dict(rule="all_to_clearing", time_trigger_min=5)),
@@ -52,5 +51,5 @@ for name, kw in runs:
                   "clearings", "avg_lp_seconds", "trust_peak_pct_of_day"]}})
 res = pd.DataFrame(rows).set_index("design")
 print(res.T.to_string())
-res.to_csv("data/step5_comparison.csv")
-print("\nSaved -> data/step5_comparison.csv")
+res.to_csv(C.STEP5_FILE)
+print(f"\nSaved -> {C.STEP5_FILE}")

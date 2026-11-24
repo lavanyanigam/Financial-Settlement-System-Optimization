@@ -1,37 +1,30 @@
-"""
-The settlement-system simulator (paper Figure 1: presettlement -> clearing -> settlement).
-
-Instructions arrive one at a time in time order (like the paper, we replay one
-real busy day rather than simulating random arrivals).
-
-  Presettlement rule
-    "all_to_clearing": every instruction waits in the queue for the next clearing.
-    "gross_first"    : if the seller has the shares AND the buyer has the cash,
-                       settle it immediately (model 1 / RTGS); otherwise queue it.
-    "gross_only"     : benchmark with no LP at all - queued items are retried
-                       one by one in arrival order (FIFO) at each cycle.
-
-  Clearing trigger (whichever comes first, as in the paper)
-    * value of instructions that arrived since the last clearing >= value_trigger
-    * number of instructions that arrived since the last clearing >= count_trigger
-    * minutes since the last clearing >= time_trigger_min
-    (Counting only NEW arrivals stops stuck items from firing the trigger forever.)
-
-  Clearing = solve P2 then P3 on the whole queue with current balances; settle
-  what the LP picks (partial settlement allowed); the rest stays pending.
-
-  Trust fund: P3 can leave a participant a few rupees overdrawn; the trust lends
-  that amount and is repaid automatically from the participant's next inflows.
-
-Measures (paper p.13):
-  avg_settle_min : average minutes from arrival to full settlement
-                   (trades still pending at the close count until the close)
-  cash_used_cr   : sum over participants of the peak amount of their cash line
-                   used (borrowed) during the day, in INR crore
-  cash_per_100_settled : cash used per INR 100 actually settled (fair when designs
-                   settle different amounts)
-  global_index   : avg_settle_min x cash_used_cr   (lower is better)
-"""
+# the settlement simulator, following the paper's figure 1: presettlement, then clearing,
+# then settlement. instructions come in one at a time in time order. like the paper, we
+# replay one real busy day instead of making up random arrivals.
+#
+# presettlement rules
+#   "all_to_clearing"  every instruction waits in the queue for the next clearing.
+#   "gross_first"      if the seller has the shares and the buyer has the cash, settle it
+#                      right away (model 1 / RTGS), otherwise queue it.
+#   "gross_only"       our benchmark with no LP at all, queued items just get retried one
+#                      by one in arrival order at each cycle.
+#
+# a clearing fires on whichever trigger is hit first, same as the paper: the value of new
+# arrivals since the last clearing, the number of new arrivals, or the minutes since the
+# last clearing. we only count new arrivals, otherwise stuck items would keep firing it.
+# a clearing solves P2 and P3 on the whole queue with the current balances, settles what
+# the LP picks (partial settlement is fine) and leaves the rest pending.
+#
+# P3 can leave a member a few rupees overdrawn, so a trust fund lends that and gets paid
+# back automatically from the member's next inflows.
+#
+# what we measure (paper p. 13)
+#   avg_settle_min        average minutes from arrival to fully settled, and anything still
+#                         pending at the close counts up to the close
+#   cash_used_cr          sum over members of the most each one had to borrow, in crore
+#   cash_per_100_settled  cash used per Rs 100 actually settled, which is fairer when designs
+#                         settle different amounts
+#   global_index          avg_settle_min x cash_used_cr, lower is better
 import time
 from collections import defaultdict
 import numpy as np
@@ -58,7 +51,7 @@ class Market:
         self.owed = defaultdict(float)
         self.trust_peak = 0.0
         self.rem = ins["qty"].to_numpy().copy()
-        self.done_at = np.full(len(ins), np.nan)  # minutes after open
+        self.done_at = np.full(len(ins), np.nan)  # minutes after the open
         self.s = ins["seller"].to_numpy()
         self.b = ins["buyer"].to_numpy()
         self.k = ins["ticker"].to_numpy()
@@ -77,17 +70,17 @@ class Market:
             self.done_at[l] = t
 
     def mark(self, who):
-        """Record low points of cash AFTER a settlement event. A clearing batch
-        settles all its trades at the same instant, so it is marked once."""
+        # note each member's lowest cash after a settlement. a clearing batch settles
+        # everything at the same instant, so it only gets marked once.
         for i in who:
             self.min_cash[i] = min(self.min_cash[i], self.cash[i])
 
     def trust(self, who):
         for i in who:
-            if self.cash[i] < 0:                       # trust covers the overdraft
+            if self.cash[i] < 0:                       # the trust covers the overdraft
                 self.owed[i] += -self.cash[i]
                 self.cash[i] = 0.0
-            if self.owed[i] > 0 and self.cash[i] > 0:  # repay from inflows
+            if self.owed[i] > 0 and self.cash[i] > 0:  # and gets paid back from inflows
                 pay = min(self.owed[i], self.cash[i])
                 self.owed[i] -= pay
                 self.cash[i] -= pay
@@ -119,7 +112,7 @@ def run(ins, sec0, cash0, rule="all_to_clearing", objective="value",
         stats["clearings"] += 1
         stats["max_queue"] = max(stats["max_queue"], len(queue))
         if rule == "gross_only":
-            for l in queue:                      # FIFO, one at a time
+            for l in queue:                      # first in first out, one at a time
                 if m.can_gross(l):
                     m.settle(l, m.rem[l], t)
                     m.mark([m.b[l]])
@@ -138,7 +131,7 @@ def run(ins, sec0, cash0, rule="all_to_clearing", objective="value",
 
     for l in range(len(ins)):
         t = arr[l]
-        while last_clear + time_trigger_min <= t:          # timer fired before this arrival
+        while last_clear + time_trigger_min <= t:          # the timer went off before this arrival
             clear(last_clear + time_trigger_min)
         if rule in ("gross_first", "gross_only") and m.can_gross(l):
             m.settle(l, m.rem[l], t)
@@ -151,7 +144,7 @@ def run(ins, sec0, cash0, rule="all_to_clearing", objective="value",
                 clear(t)
     while last_clear + time_trigger_min <= close_min:
         clear(last_clear + time_trigger_min)
-    clear(close_min)                                       # final end-of-day cycle
+    clear(close_min)                                       # one last clearing at the close
 
     done = np.where(np.isnan(m.done_at), close_min, m.done_at)
     settled_val = ((ins["qty"].to_numpy() - m.rem) * m.p).sum()

@@ -1,19 +1,14 @@
-"""
-STEP 6 - the paper's 48-scenario experiment (p.13), on your Indian data.
-
-  2 presettlement rules  x  2 objectives  x  2 value triggers
-  x 2 count triggers     x  3 time triggers (5/10/15 min)   = 48 runs
-
-For each run it records average settlement time, cash used, and the global
-index (their product), then prints the three "best" settings the paper reports:
-  1. fastest average settlement
-  2. least cash used
-  3. best global index
-and draws the time-vs-cash trade-off chart.
-
-Run:  python step6_scenarios.py
-Out:  data/scenario_results.csv, data/tradeoff_chart.png
-"""
+# step 6 is the paper's 48-scenario experiment (p. 13) run on our day of trades:
+# 2 presettlement rules x 2 objectives x 2 value triggers x 2 count triggers
+# x 3 time triggers (5/10/15 min) = 48 runs.
+#
+# for each run we record the average settlement time, the cash used and the global index
+# (the two multiplied together). then we print the three "best" settings the paper
+# reports, which are the fastest, the least cash and the best global index, and draw the
+# time vs cash trade-off chart.
+#
+# run it with: python step6_scenarios.py
+# writes data/scenario_results.csv and data/tradeoff_chart.png
 import itertools
 from multiprocessing import Pool
 import pandas as pd
@@ -33,6 +28,7 @@ def one(args):
 
 
 def main():
+    # count triggers are a fraction of the day's instructions unless absolute numbers are set
     counts = C.COUNT_TRIGGERS_ABSOLUTE or [max(1, round(s * len(ins))) for s in C.COUNT_TRIGGER_SHARES]
     grid = list(itertools.product(C.PRESETTLE_RULES, C.OBJECTIVES, C.VALUE_TRIGGER_SHARES,
                                   counts, C.TIME_TRIGGERS_MIN))
@@ -40,6 +36,7 @@ def main():
           f"(day value INR {DAY_VALUE / 1e7:,.1f} crore)")
     print(f"  value triggers: {[float(round(s * DAY_VALUE / 1e7, 2)) for s in C.VALUE_TRIGGER_SHARES]} crore"
           f" | count triggers: {counts} | time triggers: {C.TIME_TRIGGERS_MIN} min")
+    # the runs don't depend on each other, so we spread them over all the cores
     with Pool() as pool:
         rows = pool.map(one, grid)
     res = pd.DataFrame(rows)
@@ -78,8 +75,8 @@ def main():
         ax.legend(fontsize=8)
         ax.grid(alpha=.3)
         fig.tight_layout()
-        fig.savefig("data/tradeoff_chart.png", dpi=150)
-        print("Chart -> data/tradeoff_chart.png")
+        fig.savefig(C.CHART_FILE, dpi=150)
+        print(f"Chart -> {C.CHART_FILE}")
     except ImportError:
         print("(install matplotlib to get the chart)")
 

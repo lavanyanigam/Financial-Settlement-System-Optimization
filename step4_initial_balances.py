@@ -1,33 +1,24 @@
-"""
-STEP 4 - starting balances for each participant.
-
-  B_ik (securities): participant i starts the day holding
-        SECURITY_COVERAGE x (everything i sells of stock k today).
-        Below 1.0, some sales can only be delivered after i receives those
-        shares from a purchase. Settling one trade at a time then gets stuck,
-        while settling a batch together (the LP) can untangle the chain.
-
-  C_i  (cash):
-        CASH_COVERAGE = None  -> paper's set-up: cash starts at zero and
-                                 borrowing is unlimited (stored as a huge
-                                 credit line). The simulator records the peak
-                                 amount each participant had to borrow; the
-                                 total is "the amount of money required to
-                                 settle transactions".
-        CASH_COVERAGE = 0.15  -> each participant's credit line is 15% of its
-                                 day's buys, so cash can run out too.
-
-SECURITY_COVERAGE and CASH_COVERAGE are your main experiment knobs.
-
-Run:  python step4_initial_balances.py
-Out:  data/initial_securities.csv (participant, ticker, qty)
-      data/initial_cash.csv       (participant, cash_inr)
-"""
+# step 4 sets up each member's opening balances.
+#
+# shares (B_ik): member i starts the day holding SECURITY_COVERAGE times everything it
+# sells of stock k today. below 1.0 some sales can only be delivered once i has received
+# those shares from a purchase, so settling one trade at a time gets stuck while settling
+# a batch together with the LP can untangle the chain.
+#
+# cash (C_i): with CASH_COVERAGE = None we follow the paper, so cash starts at zero and
+# borrowing is unlimited (we store it as a huge credit line). the simulator then records
+# the most each member had to borrow, and the total is the paper's "amount of money
+# required to settle transactions". with CASH_COVERAGE = 0.15 each member's credit line
+# is 15% of its buys for the day, so cash can run out as well.
+#
+# run it with: python step4_initial_balances.py
+# writes data/initial_securities.csv (participant, ticker, qty)
+#    and data/initial_cash.csv (participant, cash_inr)
 import numpy as np
 import pandas as pd
 import config as C
 
-UNLIMITED = 1e15   # INR; effectively "no limit"
+UNLIMITED = 1e15   # rupees, big enough that it never runs out
 
 ins = pd.read_csv(C.INSTRUCTIONS_FILE)
 parts = pd.read_csv(C.PARTICIPANTS_FILE)["participant"]

@@ -1,33 +1,29 @@
-"""
-The clearing engine: models P2 and P3 from the paper's appendix.
-
-P2 (continuous LP, partial settlement allowed)
-    max   sum_l  p_l * x_l                (objective="value")
-      or  sum_l  x_l                      (objective="quantity")
-    s.t.  cash:  sum_{l: buyer=i} p_l x_l - sum_{l: seller=i} p_l x_l <= C_i     for each i
-          secs:  sum_{l: seller=i, sec=k} x_l - sum_{l: buyer=i, sec=k} x_l <= B_ik  for each i,k
-          0 <= x_l <= q_l
-    (The paper prints "X <= 0" in P2; that is a typo, it must be X >= 0.)
-
-P3 (integer rounding of P2)
-    Same securities constraints, NO cash constraints, x_l kept between
-    floor(x2_l) and ceil(x2_l). The securities constraint matrix is a network
-    matrix (each x appears +1 for the seller and -1 for the buyer), so it is
-    totally unimodular and the simplex solution is already integer - the paper's
-    "unimodular" argument. If those tight bounds are infeasible we relax the
-    lower bound to 0, which is always feasible.
-    Dropping cash constraints can leave tiny overdrafts (a fraction of one share
-    per trade); the paper covers those with a small trust fund, and so do we.
-
-The paper used CPLEX 10; we use the free HiGHS solver inside scipy.
-"""
+# the clearing engine, which is models P2 and P3 from the paper's appendix.
+#
+# P2 is a continuous LP where partial settlement is allowed:
+#     max   sum_l p_l * x_l        (objective="value")
+#      or   sum_l x_l              (objective="quantity")
+#     s.t.  cash:  sum_{l: buyer=i} p_l x_l - sum_{l: seller=i} p_l x_l <= C_i      for each i
+#           secs:  sum_{l: seller=i, sec=k} x_l - sum_{l: buyer=i, sec=k} x_l <= B_ik  for each i,k
+#           0 <= x_l <= q_l
+# the paper prints "X <= 0" in P2, but that's a typo and it has to be X >= 0.
+#
+# P3 turns P2's answer into whole shares. it keeps the securities rows, drops the cash rows,
+# and keeps each x_l between floor and ceil of P2's value. each x shows up as +1 for the
+# seller and -1 for the buyer, so the matrix is a network matrix, which is totally
+# unimodular, and simplex hands back integers on its own (that's the paper's "unimodular"
+# point). if those tight bounds turn out infeasible we drop the lower bound to 0, which
+# always works. dropping the cash rows can leave tiny overdrafts, and the trust fund in
+# simulator.py covers those, same as in the paper.
+#
+# the paper used CPLEX 10, we use the free HiGHS solver that comes with scipy.
 import numpy as np
 from scipy.optimize import linprog
 from scipy.sparse import coo_matrix
 
 
 def _sec_rows(seller, buyer, ticker, sec_bal):
-    """Securities constraint rows for every (participant, ticker) that sells."""
+    # one securities row for every (participant, ticker) pair that sells something
     keys = sorted(set(zip(seller, ticker)))
     idx = {k: r for r, k in enumerate(keys)}
     rows, cols, vals = [], [], []
@@ -40,14 +36,10 @@ def _sec_rows(seller, buyer, ticker, sec_bal):
 
 
 def solve_clearing(seller, buyer, ticker, qty, price, sec_bal, cash_bal, objective="value"):
-    """
-    seller, buyer, ticker : lists (one entry per pending instruction)
-    qty                   : remaining shares per instruction
-    price                 : INR per share
-    sec_bal[(i, k)]       : shares of k participant i holds now
-    cash_bal[i]           : cash participant i can still use now
-    returns integer array x (shares to settle for each instruction)
-    """
+    # seller, buyer, ticker, qty and price have one entry per queued instruction, where qty
+    # is what's still left to settle. sec_bal[(i, k)] is how many shares of k member i has
+    # right now and cash_bal[i] is the cash it can still use. we return an integer array
+    # saying how many shares of each instruction to settle.
     n = len(qty)
     if n == 0:
         return np.zeros(0, dtype=int)
@@ -55,9 +47,9 @@ def solve_clearing(seller, buyer, ticker, qty, price, sec_bal, cash_bal, objecti
     price = np.asarray(price, dtype=float)
     c = -(price if objective == "value" else np.ones(n))
 
-    # ---- P2: securities + cash
+    # P2, with securities and cash rows
     r, cc, v, sec_rhs, n_sec = _sec_rows(seller, buyer, ticker, sec_bal)
-    # cash rows only for participants whose cash is limited (>= 1e14 means "unlimited")
+    # cash rows only for members whose cash is actually limited, anything >= 1e14 counts as unlimited
     parts = sorted(p for p in set(seller) | set(buyer) if cash_bal.get(p, 0.0) < 1e14)
     pidx = {p: n_sec + j for j, p in enumerate(parts)}
     for l in range(n):
@@ -70,7 +62,7 @@ def solve_clearing(seller, buyer, ticker, qty, price, sec_bal, cash_bal, objecti
     res = linprog(c, A_ub=A, b_ub=b, bounds=np.column_stack([np.zeros(n), qty]), method="highs")
     x2 = res.x if res.status == 0 else np.zeros(n)
 
-    # ---- P3: integer, securities only, bounds floor..ceil of P2
+    # P3, securities rows only, with x between floor and ceil of P2
     r, cc, v, sec_rhs, n_sec = _sec_rows(seller, buyer, ticker, sec_bal)
     A3 = coo_matrix((v, (r, cc)), shape=(n_sec, n)).tocsr()
     lo, hi = np.floor(x2 + 1e-7), np.minimum(np.ceil(x2 - 1e-7), qty)

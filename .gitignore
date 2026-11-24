@@ -1,9 +1,10 @@
-# raw data (large, and it's the exchange's file, shouldn't be shared)
-
-
-# generated outputs (recreated every time you run the steps)
-
-
-# Python cache
+# python cache
 __pycache__/
 *.pyc
+
+# mac finder files
+.DS_Store
+.DS_Store.workspace
+
+# office lock files
+~$*
