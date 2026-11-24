@@ -1,219 +1,153 @@
-# INDEVAL-style settlement on Indian exchange trades
+# INDEVAL Settlement Optimization on Indian Equity Market Data
 
-This project rebuilds the clearing-and-settlement engine from Muñoz et al. (2011),
-*INDEVAL Develops a New Operating and Settlement System Using Operations Research*
-(Interfaces 41(1), 8–17), and runs it on one real day of Indian exchange trades.
-
-It is a **what-if**: Indian exchange trades actually settle through a clearing
-corporation on T+1. We ask how much liquidity an INDEVAL-style DvP engine would need
-for the same trades, and how long trades would wait.
+This project replicates and evaluates the Central Securities Depository clearing-and-settlement optimization model from Muñoz et al. (2011), *INDEVAL Develops a New Operating and Settlement System Using Operations Research*, Interfaces 41(1), 8–17 (Franz Edelman Award, INFORMS), using **real Indian stock exchange trade data**.
+The dataset used: [Anomaly bias Stock Trades and Order Dataset](https://data.mendeley.com/datasets/fsn6fn7ht8/1)
 
 ---
 
-## 1. Data
+## 1. What This Project Does
 
-**Source:** *Anomaly bias Stock Trades and Order Dataset* — Ahtas, Kadam, Barshikar,
-Shitole, Ghadge (2025), Mendeley Data, V1, doi:10.17632/fsn6fn7ht8.1, licence CC BY 4.0.
-Link: <https://data.mendeley.com/datasets/fsn6fn7ht8/1>
+In securities settlement, **Delivery versus Payment (DvP)** requires that the transfer of shares occurs if and only if the corresponding payment is completed.
 
-It contains trade and order logs from an Indian exchange's trading system for 7 days in
-2007, in `data/Stock_Trades_Orders/`:
+Traditional systems face an operational trade-off:
+* **Model 1 / RTGS (Real-Time Gross Settlement):** Trades settle one-by-one in real time. Settlement is fast, but requires large cash and share inventories, and trades can get stuck waiting on each other (intraday gridlock).
+* **Model 3 (End-of-Day Net Settlement):** Trades accumulate all day and are netted out at market close. Very liquidity-efficient, but settlement is delayed until end of day, leaving significant intraday risk.
 
-| file | rows | used? |
-|---|---|---|
-| `Trades .csv` | 414,957 matched trades | **yes** — every trade has a buy and a sell member code |
-| `Orders .csv` | 602,473 orders | no (the settlement model only needs executed trades) |
+**The INDEVAL Innovation ("Dalí"):**
+A **continuous hybrid settlement engine** that runs periodic batches (e.g., every 5, 10, or 15 minutes) throughout the day using **Linear Programming (LP)**. The LP untangles circular delivery chains ($A \to B \to C \to A$) and unlocks frozen queues with minimal cash.
 
-**Why this dataset.** The LP needs, for every trade, *who sold to whom*. Public L1/L2
-order-book data never shows counterparties; Level 3 / order-and-trade data does, but is
-expensive (NSE Cash Market Level 3: ₹38–42.5 lakh a year; NSE historical order and trade
-data for students: ₹6.25 lakh a year; a Bloomberg Terminal seat: about US$32,000 a year).
-This open dataset has anonymised member codes on both sides of every trade.
+This repository implements the paper's clearing models P2 and P3 inside a full presettlement → clearing → settlement simulator, and tests it on **240,522 real exchange trades** between **533 broker members** on the Indian stock market. (P1 is superseded by P2; P4 adds redemptions, which equities do not have.)
 
-Every file in `data/` is built from `Trades .csv` by the scripts below; nothing in the
-pipeline is generated or made up, the only assumptions are the opening balances and
-trigger sizes listed next.
-
-### What is real and what is assumed
-
-| input (paper notation) | where it comes from | real or assumed |
-|---|---|---|
-| seller i, buyer j | `SELL_MEMBER_CODE`, `BUY_MEMBER_CODE` (533 brokers) | **real** (anonymised) |
-| security k | `SCRIP_CODE` (4 scrips) | **real** |
-| quantity L, price p | `TRADE_QUANTITY`, `TRADE_RATE` (paise → ₹) | **real** |
-| order of arrival | `TRADE_SEQUENCE` | **real** |
-| clock time | `TRADE_TIME` holds only mm:ss; the hour is rebuilt (below) | **real, reconstructed** |
-| securities B_ik | 30% of what member i sells of k that day (`SECURITY_COVERAGE`) | assumed |
-| cash C_i | start at ₹0 with unlimited credit; we measure peak borrowing (`CASH_COVERAGE = None`) | assumed |
-| clearing triggers | same shares of our day as the paper's (see section 4) | assumed scaling |
-
-**Participants are broker members**, not end clients (the file also has 61,878 client
-IDs). Brokers are the ones that settle with a depository, like INDEVAL's participants.
-
-### Rebuilding the trade time
-
-`TRADE_TIME` was exported as `mm:ss.s`, so the hour is missing. Walking through the
-trades in `TRADE_SEQUENCE` order, the minute counter wraps back to 00 at each new hour;
-`prep.py` adds an hour at every backward jump of more than 30 minutes (and takes it back
-off on a forward jump of more than 30 minutes, which happens when trades from different
-scrips straddle the hour). The session opened at 09:55.
-
-Check: within each scrip, the rebuilt times never go backwards in `TRADE_NUMBER` order
-(0 violations on every one of the 7 days; every day runs 09:55 to about 16:00). The day
-is far from uniform — 8,306 instructions in the 9 o'clock hour, 76,336 in the 2 o'clock
-hour — so this matters for waiting times and for when the clearing triggers fire.
-
-### The day we replay
-
-13 April 2007, the busiest day in the file: 243,139 trades → minus 120 after the 15:30
-close → minus 2,497 where the same broker is on both sides = **240,522 DvP instructions**,
-533 brokers, 4 scrips, **₹862.5 crore**. One scrip (556155) is 97% of the trades and 99%
-of the value.
+It is a **what-if**: Indian exchange trades actually settle through a clearing corporation on T+1. We ask how much liquidity an INDEVAL-style DvP engine would need for the same trades, and how long trades would wait.
 
 ---
 
-## 2. Pipeline
+## 2. Dataset Information
+
+**Source:** *Anomaly bias Stock Trades and Order Dataset*, Ahtas, Kadam, Barshikar, Shitole, Ghadge (2025), Mendeley Data, V1, doi:10.17632/fsn6fn7ht8.1, licence CC BY 4.0.
+
+The data comes from historical Indian stock exchange trade logs covering 7 trading days in 2007 (`data/Stock_Trades_Orders/Trades .csv`; `Orders .csv` is included but not needed). We replay the busiest day by value, **13 April 2007**:
+* **Trades:** Real matched transactions with quantities, prices in paise (converted to ₹ INR), and exchange sequence numbers. 243,139 trades that day, minus 120 after the 15:30 close and 2,497 where the same broker is on both sides = **240,522 DvP instructions** worth **₹862.5 crore**.
+* **Securities:** 4 scrip codes as given in the dataset (e.g., `555835`, `556155`). Scrip `556155` alone is 97% of the trades and 99% of the value.
+* **Participants:** Anonymised exchange broker members (`BUY_MEMBER_CODE` and `SELL_MEMBER_CODE`, prefixed as `M<id>`).
+* **Session Replay:** `TRADE_TIME` only holds mm:ss, so `prep.py` rebuilds the hour by walking the trades in `TRADE_SEQUENCE` order and adding an hour each time the minutes wrap back to 00 (checked: within each scrip the rebuilt times never go backwards). The day is replayed from 09:55 AM to 03:30 PM.
+
+**Assumptions** (the dataset has no account balances): each member starts with 30% of the shares it sells of each stock that day ($B_{ik}$), and with ₹0 cash and unlimited credit ($C_i$), so the simulator measures each member's peak borrowing. Both are set in `config.py` (`SECURITY_COVERAGE`, `CASH_COVERAGE`).
+
+---
+
+## 3. Pipeline & Architecture
 
 ```
-data/Stock_Trades_Orders/Trades .csv     (raw exchange trade log)
-              │
-           prep.py            clean, pick the day, rebuild the hour, drop self-trades
-              │
-   ┌──────────┴──────────┐
-data/instructions.csv   data/participants.csv
-              │
-  step4_initial_balances.py   → data/initial_securities.csv (B_ik), data/initial_cash.csv (C_i)
-              │
-   ┌──────────┴───────────────────────┐
-step5_netting_benefit.py          step6_scenarios.py
-RTGS vs LP every 5 min vs          the paper's 48 scenarios
-LP once at end of day              → data/scenario_results.csv
-→ data/step5_comparison.csv        → data/tradeoff_chart.png
-   └──────────┬───────────────────────┘
-      simulator.py  ⇄  clearing_lp.py
-      (paper Fig. 1)    (models P2 + P3, HiGHS solver)
+[data/Stock_Trades_Orders/Trades .csv]  (Real Indian exchange trade log)
+                   │
+                prep.py
+                   │
+       ┌───────────┴───────────────────────┐
+       ▼                                   ▼
+[data/instructions.csv]         [data/participants.csv]
+(240,522 DvP instructions)      (533 broker members)
+       │
+step4_initial_balances.py
+       │
+       ├──> [data/initial_securities.csv] (Starting stock holdings B_ik: 30% coverage)
+       └──> [data/initial_cash.csv]       (Starting cash C_i: zero with unlimited credit by default)
+       │
+ ┌─────┴────────────────────────────────────────────────┐
+ │                                                      │
+step5_netting_benefit.py                       step6_scenarios.py
+• Gross vs Net comparison                      • 48-Scenario Simulation Grid
+• RTGS vs 5-min LP vs EOD Netting              • Speed vs Liquidity Trade-off Chart
+ │                                                      │
+ └──────────────────────────┬───────────────────────────┘
+                            ▼
+              simulator.py <──> clearing_lp.py
+              (Event Engine)     (HiGHS LP Solver: P2 + P3)
 ```
-
-| file | what it does |
-|---|---|
-| `config.py` | every setting: files, market hours, coverage, the 48-scenario grid |
-| `prep.py` | raw trades → `instructions.csv`, `participants.csv` (member code, share of traded value) |
-| `step4_initial_balances.py` | opening securities B_ik and cash C_i |
-| `clearing_lp.py` | models P2 and P3 |
-| `simulator.py` | replays the day: presettlement → queue → clearing → settlement, plus trust fund |
-| `step5_netting_benefit.py` | headline comparison of three settlement designs |
-| `step6_scenarios.py` | the paper's 48-scenario experiment and the trade-off chart |
-| `run_all.py` | runs prep → step4 → step5 → step6 |
 
 ---
 
-## 3. How to run
+## 4. Quick Start
 
+### Installation
+Python 3.10+ is recommended. Activate your virtual environment and install requirements:
 ```bash
 pip install -r requirements.txt
-python run_all.py          # about a minute on a laptop
 ```
 
-or step by step: `python prep.py`, `python step4_initial_balances.py`,
-`python step5_netting_benefit.py`, `python step6_scenarios.py`.
+### Run the Complete Pipeline
+To execute data cleaning, balance generation, headline comparisons, and the 48-scenario grid in one command (about a minute on a laptop):
+```bash
+python run_all.py
+```
 
-To replay another day, set `DATE` at the top of `prep.py` (e.g. `"19-Jul-07"`).
-To stress-test with limited credit, set `CASH_COVERAGE = 0.15` in `config.py`.
+Or run individual steps manually:
+1. **Prepare trade instructions & participants:**
+   ```bash
+   python prep.py
+   ```
+2. **Set starting inventories ($B_{ik}$) and cash limits ($C_i$):**
+   ```bash
+   python step4_initial_balances.py
+   ```
+3. **Run headline comparison (RTGS vs INDEVAL LP vs End-of-Day):**
+   ```bash
+   python step5_netting_benefit.py
+   ```
+4. **Run the 48-scenario simulation experiment:**
+   ```bash
+   python step6_scenarios.py
+   ```
 
----
-
-## 4. The model, and how it maps to the paper
-
-### P2 — continuous LP (one clearing cycle)
-$$\max \sum_l p_l x_l \quad\text{(cash value)} \qquad\text{or}\qquad \max \sum_l x_l \quad\text{(shares)}$$
-subject to, for every member i and security k:
-$$\sum_{l:\,\text{buyer}=i} p_l x_l - \sum_{l:\,\text{seller}=i} p_l x_l \le C_i \qquad\text{(cash)}$$
-$$\sum_{l:\,\text{seller}=i,\,k} x_l - \sum_{l:\,\text{buyer}=i,\,k} x_l \le B_{ik} \qquad\text{(securities)}$$
-$$0 \le x_l \le \text{remaining quantity of } l \qquad\text{(partial settlement allowed)}$$
-The paper prints "X ≤ 0" in P2; it must be X ≥ 0.
-
-### P3 — integer repair
-Securities rows only, no cash rows, with ⌊x\*⌋ ≤ x ≤ ⌈x\*⌉ from P2. Each variable appears
-+1 for the seller and −1 for the buyer, a network matrix, which is totally unimodular, so
-the simplex solution is already integer (the paper's "unimodular" argument). If those
-bounds are infeasible, the lower bound relaxes to 0. Dropping the cash rows can leave
-tiny overdrafts; a trust fund lends them and is repaid from the next inflows.
-
-**Not implemented:** P1 (superseded by P2) and P4 (redemptions and coupons — equities
-have none). Solver: HiGHS inside SciPy; the paper used CPLEX 10.
-
-**Note on cash.** With `CASH_COVERAGE = None` every member has unlimited credit, so
-`clearing_lp.py` leaves out the cash rows (the cash constraint can never bind). The LP then
-only enforces securities, and liquidity is measured as each member's peak borrowing.
-Run with `CASH_COVERAGE = 0.15` to make the cash constraint active.
-
-### The paper's settings → ours
-
-| paper | here |
-|---|---|
-| all DvP to clearing / send directly if funds are available | `all_to_clearing` / `gross_first` |
-| maximise cash / maximise number of securities | `objective = value` / `quantity` |
-| value trigger 60,000 / 75,000 million pesos | 1.8% / 2.3% of our day's value = ₹15.52 / ₹19.84 crore |
-| count trigger 250 / 350 instructions | 1.2% / 1.7% of our day's instructions = 2,886 / 4,089 — **our choice** (keeps the 250:350 ratio; the paper gives no daily count) |
-| time trigger 5 / 10 / 15 min | same |
-| average settlement time, money required, global index | `avg_settle_min`, `cash_used_cr` (sum of peak borrowing), `global_index` = time × cash |
-
-Benchmark not in the 48 grid: `gross_only` = model 1 / RTGS, one trade at a time,
-queued trades retried in arrival order every minute, no LP.
+To replay another day, set `DATE` at the top of `prep.py` (e.g. `"19-Jul-07"`). To stress-test with limited credit, set `CASH_COVERAGE = 0.15` in `config.py`.
 
 ---
 
-## 5. Results (13 April 2007, 30% securities coverage, unlimited credit)
+## 5. File Descriptions
 
-### Step 5 — three designs, same balances
-
-| design | trades settled | value settled | avg wait (min) | cash used (₹ cr) | clearings | avg LP solve |
-|---|---|---|---|---|---|---|
-| RTGS, one at a time (model 1) | 99.40% | 98.68% | 1.07 | 76.98 | 336 | — |
-| **LP clearing every 5 min (INDEVAL)** | 99.10% | 98.72% | 4.19 | **64.01** | 68 | 0.021 s |
-| LP once at end of day (model 3) | 99.13% | 98.81% | 138.09 | 24.91 | 1 | 1.67 s |
-
-- 5-minute LP clearing needs **17% less cash** than RTGS for about 3 more minutes of waiting.
-- End-of-day netting needs **68% less cash**, but trades wait 2.3 hours on average.
-- With the same holdings, the LP designs settle slightly more value: they untangle
-  delivery chains (A→B→C→A) that block one-at-a-time settlement.
-- The trust fund was never needed.
-
-Resources needed to settle every trade (Part A): cash ₹82.5 cr if each trade settles on
-arrival vs ₹27.6 cr fully netted (67% less); shares 1.45 M vs 0.57 M (61% less).
-
-### Step 6 — the 48 scenarios
-
-- Two clusters, set by the presettlement rule: **gross first** 1.40–1.58 min and
-  ₹77.1–77.4 cr; **all to clearing** 3.01–4.42 min and ₹67.0–70.9 cr.
-- **Fastest and best global index:** gross first, max cash value, ₹15.52 cr, 2,886
-  instructions, 15 min → 1.40 min, ₹77.36 cr, GPI 108.3.
-- **Least cash:** all to clearing, max shares, ₹15.52 cr, 4,089 instructions, 15 min →
-  4.42 min, ₹67.04 cr.
-- Average effect of each setting (mean over the other 24 runs):
-
-| setting | levels | avg wait (min) | cash used (₹ cr) |
-|---|---|---|---|
-| presettlement | all to clearing / gross first | 3.64 / 1.47 | 69.01 / 77.20 |
-| objective | max cash value / max shares | 2.49 / 2.63 | 73.17 / 73.04 |
-| value trigger | ₹15.52 / ₹19.84 cr | 2.56 / 2.56 | 73.07 / 73.14 |
-| count trigger | 2,886 / 4,089 | 2.45 / 2.67 | 73.62 / 72.58 |
-| time trigger | 5 / 10 / 15 min | 2.36 / 2.61 / 2.71 | 73.41 / 73.15 / 72.75 |
-
-As in the paper, the settings that are fastest are the opposite of the ones that use the
-least cash. Unlike the paper (best GPI: all to clearing, 5 min), our best GPI uses gross
-first: with unlimited credit gross settlement is never blocked by cash, so its extra
-~₹8 cr of borrowing is small next to the ~2 minutes it saves.
+* **`config.py`**: Central parameter file (file paths, market hours, security and cash coverage, trigger thresholds, scenario grid).
+* **`prep.py`**: Ingests raw exchange trades, converts paise to rupees, picks the busiest day, rebuilds the clock hour, drops trades after the close and internal broker crosses (same broker on both sides), and generates `instructions.csv` and `participants.csv`.
+* **`clearing_lp.py`**: Implements **Model P2** (continuous LP maximizing settled value or volume) and **Model P3** (totally unimodular integer rounding). Solves via SciPy's `HiGHS` solver.
+* **`simulator.py`**: Event-driven settlement simulator implementing Figure 1 from the paper (presettlement rules, batch queues, triggering conditions, and trust fund overdraft tracking).
+* **`step4_initial_balances.py`**: Sets initial security inventories ($B_{ik} = 30\%$ of daily sales) to simulate inventory friction, and initializes cash accounts ($C_i$).
+* **`step5_netting_benefit.py`**: Computes gross vs. net liquidity requirements and compares RTGS, INDEVAL 5-minute LP clearing, and End-of-Day netting under identical initial conditions.
+* **`step6_scenarios.py`**: Runs the paper's full 48-scenario grid ($2 \text{ rules} \times 2 \text{ objectives} \times 2 \text{ value triggers} \times 2 \text{ count triggers} \times 3 \text{ time triggers}$) and exports `data/scenario_results.csv` and `data/tradeoff_chart.png`.
+* **`run_all.py`**: Runs prep → step 4 → step 5 → step 6 in order.
 
 ---
 
-## 6. Limitations
+## 6. Mathematical Model (Muñoz et al., 2011)
 
-- Counterparties are broker member codes, not end clients.
-- One day, four scrips, one of which is 99% of the value.
-- Clock hours are reconstructed (validated, but not given in the file).
-- Opening holdings (30%) and unlimited credit are assumptions, not observed balances.
-- Indian trades really settle through a central counterparty on T+1; this is a what-if.
-- P3 is a rounding repair, not a global optimum (as in the paper); P4 is not implemented.
-- A deterministic replay of one day: no random arrivals, no confidence intervals.
-- The dataset was published for anomaly/fraud detection research; we use it as-is.
+$X_{ijkl}$ is the number of shares of security $k$ settled in transaction $l$, where participant $i$ sells to participant $j$.
+
+### Model P2 (Continuous LP)
+$$\max \sum_{i,j,k,l} p_{ijkl} X_{ijkl} \quad \text{(or } \max \sum X_{ijkl} \text{ to maximize shares settled)}$$
+subject to:
+$$\sum_{j,l,k} p_{jikl} X_{jikl} - \sum_{j,l,k} p_{ijkl} X_{ijkl} \le C_i \quad \forall i \quad \text{(Cash Balance Constraint)}$$
+$$\sum_{j,l} X_{ijkl} - \sum_{j,l} X_{jikl} \le B_{ik} \quad \forall i, k \quad \text{(Securities Balance Constraint)}$$
+$$0 \le X_{ijkl} \le L_{ijkl} \quad \forall i,j,k,l \quad \text{(Trade Cap)}$$
+
+The paper prints $X \le 0$ in P2; it must be $X \ge 0$. With unlimited credit (the default) the cash rows can never bind, so the code leaves them out.
+
+### Model P3 (Integer Unimodular Rounding)
+To prevent delivering fractional shares, bounds are constrained to:
+$$I_{ijkl} \le X_{ijkl} \le I_{ijkl} + 1$$
+where $I_{ijkl} = \lfloor X_{ijkl}^* \rfloor$ from P2. Cash constraints are dropped, leaving only the securities rows. Each variable appears +1 for the seller and −1 for the buyer, so the matrix is totally unimodular and the simplex solution is already integer. If those bounds are infeasible, the lower bound relaxes to 0. Any small cash overdrafts left by dropping the cash rows are covered by a trust fund and repaid from subsequent inflows. As in the paper, P3 is a rounding repair, not a guaranteed global optimum.
+
+---
+
+## 7. Results on Indian Data
+
+On 240,522 real exchange trades (Day Value: ₹862.5 Crore) under 30% initial inventory coverage and unlimited credit:
+
+| Settlement Design | % Value Settled | Avg Delay | Peak Cash Required | LP Solve Time |
+| :--- | :---: | :---: | :---: | :---: |
+| **Model 1: RTGS (Gross, 1-min retry)** | 98.68% | **1.07 mins** | **₹76.98 crore** | — |
+| **INDEVAL Model: LP Batch (5 min)** | **98.72%** | **4.19 mins** | **₹64.01 crore** | **0.021 s** |
+| **Model 3: End-of-Day Netting** | 98.81% | 138.09 mins | **₹24.91 crore** | 1.681 s |
+
+**Key Findings:**
+1. **Liquidity Savings:** Periodic 5-minute LP clearing saves about **₹13 crore (17%)** in intraday borrowing compared to RTGS; end-of-day netting saves 68% but trades wait 2.3 hours on average.
+2. **Speed:** Trades settle within **4.2 minutes** on average, close to real time without the large cash drain of pure RTGS.
+3. **Deadlock Resolution:** Multilateral LP batching settles slightly higher total value (98.72% vs 98.68%) because it resolves circular inventory gridlocks that freeze sequential bilateral RTGS queues.
+4. **48 Scenarios:** The presettlement rule matters most. Settling gross first when funded gives 1.40–1.58 min at about ₹77 crore; sending everything to clearing gives 3.01–4.42 min at ₹67–71 crore. The fastest setting is the opposite of the cheapest one, the same speed-versus-liquidity trade-off the paper reports.
